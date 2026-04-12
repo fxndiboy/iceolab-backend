@@ -1,8 +1,9 @@
-// Versão: 1.0.4 - Integração Supabase (salvar e listar contas Instagram)
+// Versão: 1.0.5 - Lab de Reels (upload de pasta + publicação)
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
+const multer = require('multer');
 const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
@@ -159,6 +160,37 @@ app.get('/api/accounts', async (req, res) => {
 });
 
 // 6. Motor de Publicação de Reels
+// configuração multer — armazena em memória, limite de 500MB
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 500 * 1024 * 1024 }
+});
+
+// 6a. Upload de vídeo → Supabase Storage → retorna URL pública
+app.post('/api/videos/upload', upload.single('video'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado.' });
+
+  const { originalname, buffer, mimetype } = req.file;
+  const safeName = `${Date.now()}-${originalname.replace(/[^a-z0-9._-]/gi, '_')}`;
+
+  console.log(`[Upload] Recebido: ${originalname} (${(buffer.length / 1024 / 1024).toFixed(1)} MB)`);
+
+  const { error: uploadError } = await supabase.storage
+    .from('videos')
+    .upload(safeName, buffer, { contentType: mimetype, upsert: false });
+
+  if (uploadError) {
+    console.error('[Upload] Erro no Supabase Storage:', uploadError.message);
+    return res.status(500).json({ error: uploadError.message });
+  }
+
+  const { data: urlData } = supabase.storage.from('videos').getPublicUrl(safeName);
+  console.log(`[Upload] ✅ URL pública: ${urlData.publicUrl}`);
+
+  res.json({ success: true, url: urlData.publicUrl, name: originalname });
+});
+
+// 6b. Motor de postagem de Reels (já existente)
 app.post('/api/reels/post', async (req, res) => {
   const { video_url, caption } = req.body;
 
