@@ -39,14 +39,14 @@ app.get('/api/status', (req, res) => {
   });
 });
 
-// 3. Autenticação OAuth 2.0 — Facebook Graph API v19 (suporta escopos de negócio)
+// 3. Autenticação OAuth 2.0 — Instagram Display API
 app.get('/api/auth/meta', (req, res) => {
   const metaAppId = process.env.META_APP_ID;
   const redirectUri = process.env.REDIRECT_URI;
-  const scope = 'instagram_basic,instagram_content_publish,pages_show_list,pages_read_engagement';
+  const scope = 'user_profile,user_media';
 
   const authUrl =
-    `https://www.facebook.com/v19.0/dialog/oauth` +
+    `https://api.instagram.com/oauth/authorize` +
     `?client_id=${metaAppId}` +
     `&redirect_uri=${encodeURIComponent(redirectUri)}` +
     `&scope=${scope}` +
