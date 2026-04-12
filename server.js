@@ -45,15 +45,16 @@ app.get('/api/status', (req, res) => {
 
 // 3. Autenticação OAuth 2.0 — Instagram Business Login (interface 100% Instagram)
 app.get('/api/auth/meta', (req, res) => {
-  // endpoint oficial: www.instagram.com (não api.instagram.com)
-  // enable_fb_login=0 → esconde o botão "Entrar com Facebook" na tela de login
+  const clientId    = '828166929780571';
   const redirectUri = encodeURIComponent(process.env.REDIRECT_URI);
-  const authUrl = `https://www.instagram.com/oauth/authorize?client_id=1498700398332951&redirect_uri=${redirectUri}&scope=instagram_business_basic,instagram_business_content_publish&response_type=code&enable_fb_login=0`;
+  const scope       = encodeURIComponent('instagram_business_basic,instagram_business_content_publish');
 
-  console.log('[Auth] client_id : 1498700398332951');
-  console.log('[Auth] redirect_uri (raw):', process.env.REDIRECT_URI);
-  console.log('[Auth] redirect_uri (encoded):', redirectUri);
-  console.log('[Auth] URL completa:', authUrl);
+  const authUrl = `https://www.instagram.com/oauth/authorize?force_reauth=true&client_id=${clientId}&redirect_uri=${redirectUri}&response_type=code&scope=${scope}`;
+
+  console.log('[Auth] client_id   :', clientId);
+  console.log('[Auth] redirect_uri:', process.env.REDIRECT_URI);
+  console.log('[Auth] scope       : instagram_business_basic, instagram_business_content_publish');
+  console.log('[Auth] URL gerada  :', authUrl);
   res.redirect(authUrl);
 });
 
