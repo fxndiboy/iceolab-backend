@@ -1,4 +1,4 @@
-// Versão: 1.0.5 - Lab de Reels (upload de pasta + publicação)
+// Versão: 1.0.6 - Agendador + bucket auto-create
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -9,11 +9,31 @@ const { createClient } = require('@supabase/supabase-js');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Inicializa o cliente Supabase com a service_role key (acesso total, só no backend)
+// Inicializa o cliente Supabase
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
+
+// Auto-cria o bucket "videos" se não existir
+async function ensureStorageBucket() {
+  try {
+    const { data: buckets } = await supabase.storage.listBuckets();
+    const exists = buckets?.some(b => b.name === 'videos');
+    if (!exists) {
+      await supabase.storage.createBucket('videos', {
+        public: true,
+        fileSizeLimit: 524288000 // 500 MB
+      });
+      console.log('[Storage] Bucket "videos" criado automaticamente.');
+    } else {
+      console.log('[Storage] Bucket "videos" OK.');
+    }
+  } catch (e) {
+    console.warn('[Storage] Não foi possível verificar bucket:', e.message);
+  }
+}
+ensureStorageBucket();
 
 // 1. Configuração Robusta de CORS
 const allowedOrigins = [
@@ -158,6 +178,52 @@ app.get('/api/accounts', async (req, res) => {
     res.status(500).json({ error: 'Erro interno do servidor.' });
   }
 });
+
+// ── Função compartilhada: posta um Reel no Instagram ──────────────
+async function postReelToInstagram(videoUrl, caption = '', accountId = null) {
+  let query = supabase
+    .from('instagram_accounts')
+    .select('access_token, instagram_username');
+
+  if (accountId) {
+    query = query.eq('id', accountId);
+  } else {
+    query = query.order('created_at', { ascending: false }).limit(1);
+  }
+
+  const { data: accounts } = await query;
+  if (!accounts?.length) throw new Error('Conta Instagram não encontrada.');
+  const { access_token, instagram_username } = accounts[0];
+
+  const meRes = await axios.get('https://graph.instagram.com/me', {
+    params: { fields: 'user_id', access_token }
+  });
+  const igUserId = meRes.data.user_id || meRes.data.id;
+
+  const containerRes = await axios.post(
+    `https://graph.instagram.com/v22.0/${igUserId}/media`, null,
+    { params: { media_type: 'REELS', video_url: videoUrl, caption, access_token } }
+  );
+  const containerId = containerRes.data.id;
+
+  // Polling
+  let statusCode = 'IN_PROGRESS', attempts = 0;
+  while (statusCode === 'IN_PROGRESS' && attempts < 20) {
+    await new Promise(r => setTimeout(r, 15000));
+    attempts++;
+    const s = await axios.get(`https://graph.instagram.com/v22.0/${containerId}`,
+      { params: { fields: 'status_code', access_token } });
+    statusCode = s.data.status_code;
+    if (statusCode === 'ERROR') throw new Error('Meta rejeitou o vídeo: ' + JSON.stringify(s.data));
+  }
+  if (statusCode !== 'FINISHED') throw new Error('Timeout no processamento do vídeo');
+
+  const publishRes = await axios.post(
+    `https://graph.instagram.com/v22.0/${igUserId}/media_publish`, null,
+    { params: { creation_id: containerId, access_token } }
+  );
+  return { post_id: publishRes.data.id, username: instagram_username };
+}
 
 // 6. Motor de Publicação de Reels
 // configuração multer — armazena em memória, limite de 500MB
@@ -304,10 +370,82 @@ app.post('/api/reels/post', async (req, res) => {
   }
 });
 
-// 6. Inicialização do Servidor
+// 7. Lista vídeos disponíveis no Supabase Storage
+app.get('/api/videos', async (req, res) => {
+  const { data, error } = await supabase.storage
+    .from('videos')
+    .list('', { limit: 200, sortBy: { column: 'created_at', order: 'desc' } });
+
+  if (error) return res.status(500).json({ error: error.message });
+
+  const videos = (data || [])
+    .filter(f => f.name !== '.emptyFolderPlaceholder')
+    .map(f => ({
+      name: f.name,
+      size: f.metadata?.size || 0,
+      created_at: f.created_at,
+      url: supabase.storage.from('videos').getPublicUrl(f.name).data.publicUrl
+    }));
+
+  res.json({ videos });
+});
+
+// 8. Agendador — enfileira posts com intervalo/humanizador
+app.post('/api/schedule', async (req, res) => {
+  const { items, postNow, scheduledAt, intervalMode, intervalMin, intervalMax, account_id } = req.body;
+
+  if (!items?.length) return res.status(400).json({ error: 'Nenhum item para agendar.' });
+  if (!account_id) return res.status(400).json({ error: 'Selecione uma conta para postagem.' });
+
+  const minMs = (intervalMin || 10) * 60 * 1000;
+  const maxMs = (intervalMax || 15) * 60 * 1000;
+  const humanize = intervalMode === 'humanize';
+
+  const startMs = postNow
+    ? Date.now()
+    : new Date(scheduledAt).getTime();
+
+  const queue = [];
+  let accumulatedDelay = 0;
+
+  items.forEach((item, idx) => {
+    if (idx > 0) {
+      const gap = humanize
+        ? Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs
+        : minMs;
+      accumulatedDelay += gap;
+    }
+
+    const fireAt = startMs + accumulatedDelay;
+    const delayFromNow = Math.max(0, fireAt - Date.now());
+
+    console.log(`[Schedule] Item ${idx + 1}/${items.length} "${item.name}" → em ${Math.round(delayFromNow / 1000)}s`);
+
+    setTimeout(async () => {
+      console.log(`[Schedule] ▶ Postando "${item.name}"...`);
+      try {
+        const result = await postReelToInstagram(item.url, item.caption || '', account_id);
+        console.log(`[Schedule] ✅ "${item.name}" publicado. Post ID: ${result.post_id}`);
+      } catch (e) {
+        console.error(`[Schedule] ❌ Erro em "${item.name}":`, e.message);
+      }
+    }, delayFromNow);
+
+    queue.push({
+      index: idx + 1,
+      name: item.name,
+      scheduled_at: new Date(fireAt).toISOString(),
+      delay_min: Math.round(accumulatedDelay / 60000)
+    });
+  });
+
+  res.json({ success: true, total: items.length, queue });
+});
+
+// Inicialização do Servidor
 app.listen(PORT, () => {
   console.log(`\n========================================`);
-  console.log(`🚀 IceoLab Backend v1.0.4 Operacional`);
+  console.log(`🚀 IceoLab Backend v1.0.6 Operacional`);
   console.log(`🔌 Porta: ${PORT}`);
   console.log(`🗄️  Supabase: ${process.env.SUPABASE_URL ? 'Conectado' : '⚠️ URL ausente!'}`);
   console.log(`🛡️  CORS: ${process.env.FRONTEND_URL}`);
