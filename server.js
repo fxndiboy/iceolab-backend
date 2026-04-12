@@ -1,4 +1,4 @@
-// Versão: 1.0.1 - Fix Instagram Auth
+// Versão: 1.0.2 - Fix Instagram Business Auth (Facebook Graph API)
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -17,7 +17,6 @@ const allowedOrigins = [
 
 const corsOptions = {
   origin: function (origin, callback) {
-    // Permite requests sem origem (Postman, curl) e origens da lista
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
@@ -40,14 +39,15 @@ app.get('/api/status', (req, res) => {
   });
 });
 
-// 3. Autenticação OAuth 2.0 — Instagram Display API
+// 3. Autenticação OAuth 2.0 — Instagram Business via Facebook Graph API v19
 app.get('/api/auth/meta', (req, res) => {
-  const authUrl = 'https://api.instagram.com/oauth/authorize?client_id=828166929780571&redirect_uri=https://iceolab-backend.onrender.com/api/auth/meta/callback&scope=user_profile,user_media&response_type=code';
+  const authUrl = 'https://www.facebook.com/v19.0/dialog/oauth?client_id=828166929780571&redirect_uri=https://iceolab-backend.onrender.com/api/auth/meta/callback&scope=instagram_basic,instagram_content_publish,pages_show_list,pages_read_engagement&response_type=code';
 
   console.log('[Auth] Redirecionando para:', authUrl);
   res.redirect(authUrl);
 });
 
+// 4. Callback — Troca o code pelo access_token via Graph API
 app.get('/api/auth/meta/callback', async (req, res) => {
   const { code } = req.query;
   const redirectUri = process.env.REDIRECT_URI;
@@ -57,7 +57,7 @@ app.get('/api/auth/meta/callback', async (req, res) => {
   }
 
   try {
-    const tokenResponse = await axios.post('https://api.instagram.com/oauth/access_token', new URLSearchParams({
+    const tokenResponse = await axios.post('https://graph.facebook.com/v19.0/oauth/access_token', new URLSearchParams({
       client_id: process.env.META_APP_ID,
       client_secret: process.env.META_APP_SECRET,
       grant_type: 'authorization_code',
@@ -79,7 +79,7 @@ app.get('/api/auth/meta/callback', async (req, res) => {
   }
 });
 
-// 4. Inicialização do Servidor Central
+// 5. Inicialização do Servidor Central
 app.listen(PORT, () => {
   console.log(`\n========================================`);
   console.log(`🚀 IceoLab Backend Operacional`);
