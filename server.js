@@ -43,11 +43,17 @@ app.get('/api/status', (req, res) => {
   res.json({ status: 'ok', message: 'Motor do IceoLab online v1.0.4' });
 });
 
-// 3. Autenticação OAuth 2.0 — Instagram Business API
+// 3. Autenticação OAuth 2.0 — Instagram Business Login (interface 100% Instagram)
 app.get('/api/auth/meta', (req, res) => {
-  const authUrl = 'https://www.instagram.com/oauth/authorize?client_id=1498700398332951&redirect_uri=https://iceolab-backend.onrender.com/api/auth/meta/callback&scope=public_profile,instagram_business_basic,instagram_business_content_publish&response_type=code';
+  // endpoint oficial: www.instagram.com (não api.instagram.com)
+  // enable_fb_login=0 → esconde o botão "Entrar com Facebook" na tela de login
+  const redirectUri = encodeURIComponent(process.env.REDIRECT_URI);
+  const authUrl = `https://www.instagram.com/oauth/authorize?client_id=1498700398332951&redirect_uri=${redirectUri}&scope=instagram_business_basic,instagram_business_content_publish&response_type=code&enable_fb_login=0`;
 
-  console.log('[Auth] Redirecionando para:', authUrl);
+  console.log('[Auth] client_id : 1498700398332951');
+  console.log('[Auth] redirect_uri (raw):', process.env.REDIRECT_URI);
+  console.log('[Auth] redirect_uri (encoded):', redirectUri);
+  console.log('[Auth] URL completa:', authUrl);
   res.redirect(authUrl);
 });
 
@@ -62,7 +68,7 @@ app.get('/api/auth/meta/callback', async (req, res) => {
   }
 
   try {
-    // Passo 1: Troca o code pelo access_token de curta duração
+    // Passo 1: Troca o code pelo access_token (endpoint correto: api.instagram.com)
     const tokenResponse = await axios.post(
       'https://api.instagram.com/oauth/access_token',
       new URLSearchParams({
@@ -75,7 +81,10 @@ app.get('/api/auth/meta/callback', async (req, res) => {
       { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
     );
 
-    const { access_token, user_id } = tokenResponse.data;
+    // Novo formato da API: { data: [{ access_token, user_id, permissions }] }
+    // Suporta também o formato legado: { access_token, user_id }
+    const tokenData = tokenResponse.data?.data?.[0] || tokenResponse.data;
+    const { access_token, user_id } = tokenData;
     console.log('[Callback] Token recebido para user_id:', user_id);
 
     // Passo 2: Busca o username e profile_picture_url na Graph API
