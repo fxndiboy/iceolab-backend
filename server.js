@@ -1,4 +1,4 @@
-// Versão: 1.0.2 - Fix Instagram Business Auth (Facebook Graph API)
+// Versão: 1.0.3 - Instagram Business API (endpoint nativo api.instagram.com)
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -39,9 +39,9 @@ app.get('/api/status', (req, res) => {
   });
 });
 
-// 3. Autenticação OAuth 2.0 — Instagram Business via Facebook Graph API v19
+// 3. Autenticação OAuth 2.0 — Instagram Business API (endpoint nativo)
 app.get('/api/auth/meta', (req, res) => {
-  const authUrl = 'https://www.facebook.com/v19.0/dialog/oauth?client_id=828166929780571&redirect_uri=https://iceolab-backend.onrender.com/api/auth/meta/callback&scope=instagram_basic,instagram_content_publish,pages_show_list,pages_read_engagement&response_type=code';
+  const authUrl = 'https://api.instagram.com/oauth/authorize?client_id=828166929780571&redirect_uri=https://iceolab-backend.onrender.com/api/auth/meta/callback&scope=instagram_business_basic,instagram_business_manage_messages&response_type=code';
 
   console.log('[Auth] Redirecionando para:', authUrl);
   res.redirect(authUrl);
@@ -57,7 +57,7 @@ app.get('/api/auth/meta/callback', async (req, res) => {
   }
 
   try {
-    const tokenResponse = await axios.post('https://graph.facebook.com/v19.0/oauth/access_token', new URLSearchParams({
+    const tokenResponse = await axios.post('https://api.instagram.com/oauth/access_token', new URLSearchParams({
       client_id: process.env.META_APP_ID,
       client_secret: process.env.META_APP_SECRET,
       grant_type: 'authorization_code',
