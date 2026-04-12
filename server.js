@@ -1,11 +1,18 @@
-// Versão: 1.0.3 - Instagram Business API (endpoint nativo api.instagram.com)
+// Versão: 1.0.4 - Integração Supabase (salvar e listar contas Instagram)
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
+const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+// Inicializa o cliente Supabase com a service_role key (acesso total, só no backend)
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
 
 // 1. Configuração Robusta de CORS
 const allowedOrigins = [
@@ -31,15 +38,12 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use(express.json());
 
-// 2. Rota simples de Teste de Status
+// 2. Rota de Teste de Status
 app.get('/api/status', (req, res) => {
-  res.json({
-    status: 'ok',
-    message: 'Motor do IceoLab online'
-  });
+  res.json({ status: 'ok', message: 'Motor do IceoLab online v1.0.4' });
 });
 
-// 3. Autenticação OAuth 2.0 — Instagram Business API (endpoint nativo)
+// 3. Autenticação OAuth 2.0 — Instagram Business API
 app.get('/api/auth/meta', (req, res) => {
   const authUrl = 'https://api.instagram.com/oauth/authorize?client_id=828166929780571&redirect_uri=https://iceolab-backend.onrender.com/api/auth/meta/callback&scope=instagram_business_basic,instagram_business_manage_messages&response_type=code';
 
@@ -47,43 +51,99 @@ app.get('/api/auth/meta', (req, res) => {
   res.redirect(authUrl);
 });
 
-// 4. Callback — Troca o code pelo access_token via Graph API
+// 4. Callback — Troca o code pelo token, busca o perfil e salva no Supabase
 app.get('/api/auth/meta/callback', async (req, res) => {
   const { code } = req.query;
   const redirectUri = process.env.REDIRECT_URI;
 
   if (!code) {
-    return res.status(400).json({ error: 'Código de autorização não recebido.' });
+    console.error('[Callback] Código de autorização ausente.');
+    return res.redirect(`${process.env.FRONTEND_URL}/dashboard?status=error&reason=no_code`);
   }
 
   try {
-    const tokenResponse = await axios.post('https://api.instagram.com/oauth/access_token', new URLSearchParams({
-      client_id: process.env.META_APP_ID,
-      client_secret: process.env.META_APP_SECRET,
-      grant_type: 'authorization_code',
-      redirect_uri: redirectUri,
-      code: code
-    }), {
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded'
+    // Passo 1: Troca o code pelo access_token de curta duração
+    const tokenResponse = await axios.post(
+      'https://api.instagram.com/oauth/access_token',
+      new URLSearchParams({
+        client_id: process.env.META_APP_ID,
+        client_secret: process.env.META_APP_SECRET,
+        grant_type: 'authorization_code',
+        redirect_uri: redirectUri,
+        code: code
+      }),
+      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+    );
+
+    const { access_token, user_id } = tokenResponse.data;
+    console.log('[Callback] Token recebido para user_id:', user_id);
+
+    // Passo 2: Busca o username e profile_picture_url na Graph API
+    const profileResponse = await axios.get('https://graph.instagram.com/me', {
+      params: {
+        fields: 'id,username,profile_picture_url',
+        access_token: access_token
       }
     });
 
-    const accessToken = tokenResponse.data.access_token;
-    console.log('Token recebido:', accessToken);
+    const { username, profile_picture_url } = profileResponse.data;
+    console.log('[Callback] Perfil obtido:', username);
 
+    // Passo 3: Salva (upsert) a conta no Supabase
+    // NOTA: user_id aqui é o ID do Instagram. Quando houver auth de usuário
+    // (Supabase Auth), substitua por req.user.id ou similar.
+    const { error: dbError } = await supabase
+      .from('instagram_accounts')
+      .upsert(
+        {
+          instagram_username: username,
+          access_token: access_token,
+          profile_picture: profile_picture_url || null
+        },
+        { onConflict: 'instagram_username' }
+      );
+
+    if (dbError) {
+      console.error('[Supabase] Erro ao salvar conta:', dbError.message);
+      return res.redirect(`${process.env.FRONTEND_URL}/dashboard?status=error&reason=db_error`);
+    }
+
+    console.log('[Supabase] Conta salva com sucesso:', username);
     res.redirect(`${process.env.FRONTEND_URL}/dashboard?status=success`);
+
   } catch (error) {
-    console.error('Erro na autenticação:', error.response ? error.response.data : error.message);
-    res.redirect(`${process.env.FRONTEND_URL}/dashboard?status=error`);
+    const errDetail = error.response ? JSON.stringify(error.response.data) : error.message;
+    console.error('[Callback] Erro geral:', errDetail);
+    res.redirect(`${process.env.FRONTEND_URL}/dashboard?status=error&reason=auth_failed`);
   }
 });
 
-// 5. Inicialização do Servidor Central
+// 5. Rota: Lista todas as contas Instagram vinculadas
+app.get('/api/accounts', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('instagram_accounts')
+      .select('id, instagram_username, profile_picture, created_at')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('[Accounts] Erro ao buscar contas:', error.message);
+      return res.status(500).json({ error: 'Erro ao buscar contas.' });
+    }
+
+    res.json({ accounts: data });
+  } catch (err) {
+    console.error('[Accounts] Erro inesperado:', err.message);
+    res.status(500).json({ error: 'Erro interno do servidor.' });
+  }
+});
+
+// 6. Inicialização do Servidor
 app.listen(PORT, () => {
   console.log(`\n========================================`);
-  console.log(`🚀 IceoLab Backend Operacional`);
+  console.log(`🚀 IceoLab Backend v1.0.4 Operacional`);
   console.log(`🔌 Porta: ${PORT}`);
-  console.log(`🛡️  CORS Limitado a: ${process.env.FRONTEND_URL || 'Nenhuma origem restrita (Verifique o .env)'}`);
+  console.log(`🗄️  Supabase: ${process.env.SUPABASE_URL ? 'Conectado' : '⚠️ URL ausente!'}`);
+  console.log(`🛡️  CORS: ${process.env.FRONTEND_URL}`);
   console.log(`========================================\n`);
 });
