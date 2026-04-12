@@ -10,6 +10,7 @@ const PORT = process.env.PORT || 3001;
 const allowedOrigins = [
   process.env.FRONTEND_URL,       // https://www.reidobaralho.com.br
   'http://localhost:5173',        // dev local (frontend Vite)
+  'http://localhost:3000',        // dev local (alternativo)
   'http://localhost:3001'         // dev local (backend)
 ].filter(Boolean);
 
