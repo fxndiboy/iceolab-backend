@@ -89,26 +89,35 @@ app.get('/api/auth/meta/callback', async (req, res) => {
     const { username, profile_picture_url } = profileResponse.data;
     console.log('[Callback] Perfil obtido:', username);
 
-    // Passo 3: Salva (upsert) a conta no Supabase
-    // NOTA: user_id aqui é o ID do Instagram. Quando houver auth de usuário
-    // (Supabase Auth), substitua por req.user.id ou similar.
-    const { error: dbError } = await supabase
-      .from('instagram_accounts')
-      .upsert(
-        {
-          instagram_username: username,
-          access_token: access_token,
-          profile_picture: profile_picture_url || null
-        },
-        { onConflict: 'instagram_username' }
-      );
+    // Passo 3: Monta o objeto a ser salvo no Supabase
+    // UUID fixo de teste — substitua pelo ID real do usuário logado quando houver auth
+    const dataToInsert = {
+      user_id: '00000000-0000-0000-0000-000000000001',
+      instagram_username: username,
+      access_token: access_token,
+      profile_picture: profile_picture_url || null
+    };
 
-    if (dbError) {
-      console.error('[Supabase] Erro ao salvar conta:', dbError.message);
+    console.log('=== JSON QUE VAI PRO BANCO ===');
+    console.log(JSON.stringify(dataToInsert, null, 2));
+    console.log('==============================');
+
+    const { data: savedData, error } = await supabase
+      .from('instagram_accounts')
+      .insert([dataToInsert])
+      .select(); // .select() confirma o retorno do registro inserido
+
+    if (error) {
+      console.error('--- ERRO NO SUPABASE ---');
+      console.error('Mensagem:', error.message);
+      console.error('Código:', error.code);
+      console.error('Detalhes:', error.details);
+      console.error('Hint:', error.hint);
+      console.error('------------------------');
       return res.redirect(`${process.env.FRONTEND_URL}/dashboard?status=error&reason=db_error`);
     }
 
-    console.log('[Supabase] Conta salva com sucesso:', username);
+    console.log('--- SALVO COM SUCESSO! ---', savedData);
     res.redirect(`${process.env.FRONTEND_URL}/dashboard?status=success`);
 
   } catch (error) {
