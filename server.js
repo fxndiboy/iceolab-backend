@@ -92,7 +92,7 @@ app.get('/api/auth/meta/callback', async (req, res) => {
     // Passo 3: Monta o objeto a ser salvo no Supabase
     // UUID fixo de teste — substitua pelo ID real do usuário logado quando houver auth
     const dataToInsert = {
-      user_id: '00000000-0000-0000-0000-000000000001',
+      user_id: null,
       instagram_username: username,
       access_token: access_token,
       profile_picture: profile_picture_url || null
@@ -118,7 +118,7 @@ app.get('/api/auth/meta/callback', async (req, res) => {
     }
 
     console.log('--- SALVO COM SUCESSO! ---', savedData);
-    res.redirect(`${process.env.FRONTEND_URL}/dashboard?status=success`);
+    res.redirect(`${process.env.FRONTEND_URL}/dashboard?success=true`);
 
   } catch (error) {
     const errDetail = error.response ? JSON.stringify(error.response.data) : error.message;
