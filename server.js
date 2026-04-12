@@ -1,3 +1,4 @@
+// Versão: 1.0.1 - Fix Instagram Auth
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -41,16 +42,7 @@ app.get('/api/status', (req, res) => {
 
 // 3. Autenticação OAuth 2.0 — Instagram Display API
 app.get('/api/auth/meta', (req, res) => {
-  const metaAppId = process.env.META_APP_ID;
-  const redirectUri = process.env.REDIRECT_URI;
-  const scope = 'user_profile,user_media';
-
-  const authUrl =
-    `https://api.instagram.com/oauth/authorize` +
-    `?client_id=${metaAppId}` +
-    `&redirect_uri=${encodeURIComponent(redirectUri)}` +
-    `&scope=${scope}` +
-    `&response_type=code`;
+  const authUrl = 'https://api.instagram.com/oauth/authorize?client_id=828166929780571&redirect_uri=https://iceolab-backend.onrender.com/api/auth/meta/callback&scope=user_profile,user_media&response_type=code';
 
   console.log('[Auth] Redirecionando para:', authUrl);
   res.redirect(authUrl);
@@ -59,13 +51,13 @@ app.get('/api/auth/meta', (req, res) => {
 app.get('/api/auth/meta/callback', async (req, res) => {
   const { code } = req.query;
   const redirectUri = process.env.REDIRECT_URI;
-  
+
   if (!code) {
     return res.status(400).json({ error: 'Código de autorização não recebido.' });
   }
 
   try {
-    const tokenResponse = await axios.post(`https://api.instagram.com/oauth/access_token`, new URLSearchParams({
+    const tokenResponse = await axios.post('https://api.instagram.com/oauth/access_token', new URLSearchParams({
       client_id: process.env.META_APP_ID,
       client_secret: process.env.META_APP_SECRET,
       grant_type: 'authorization_code',
