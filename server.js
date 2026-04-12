@@ -45,7 +45,7 @@ app.get('/api/status', (req, res) => {
 
 // 3. Autenticação OAuth 2.0 — Instagram Business API
 app.get('/api/auth/meta', (req, res) => {
-  const authUrl = 'https://api.instagram.com/oauth/authorize?client_id=828166929780571&redirect_uri=https://iceolab-backend.onrender.com/api/auth/meta/callback&scope=public_profile,instagram_business_basic,instagram_business_content_publish&response_type=code';
+  const authUrl = 'https://www.instagram.com/oauth/authorize?client_id=1498700398332951&redirect_uri=https://iceolab-backend.onrender.com/api/auth/meta/callback&scope=public_profile,instagram_business_basic,instagram_business_content_publish&response_type=code';
 
   console.log('[Auth] Redirecionando para:', authUrl);
   res.redirect(authUrl);
