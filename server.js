@@ -137,6 +137,7 @@ app.get('/api/auth/meta/callback', async (req, res) => {
   }
 });
 
+
 // 5. Rota: Lista todas as contas Instagram vinculadas
 app.get('/api/accounts', async (req, res) => {
   try {
@@ -154,6 +155,120 @@ app.get('/api/accounts', async (req, res) => {
   } catch (err) {
     console.error('[Accounts] Erro inesperado:', err.message);
     res.status(500).json({ error: 'Erro interno do servidor.' });
+  }
+});
+
+// 6. Motor de Publicação de Reels
+app.post('/api/reels/post', async (req, res) => {
+  const { video_url, caption } = req.body;
+
+  if (!video_url) {
+    return res.status(400).json({ error: 'video_url é obrigatório.' });
+  }
+
+  console.log('\n========== [Reels] Nova Solicitação de Postagem ==========');
+  console.log('video_url :', video_url);
+  console.log('caption   :', caption || '(sem legenda)');
+
+  try {
+    // ── Etapa 0: Busca o access_token e username no Supabase ─────────
+    const { data: accounts, error: dbError } = await supabase
+      .from('instagram_accounts')
+      .select('access_token, instagram_username')
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+    if (dbError || !accounts?.length) {
+      console.error('[Reels] Nenhuma conta no Supabase:', dbError?.message);
+      return res.status(404).json({ error: 'Nenhuma conta Instagram conectada.' });
+    }
+
+    const { access_token, instagram_username } = accounts[0];
+    console.log('[Reels] Conta:', instagram_username);
+
+    // ── Etapa 0b: Busca o Instagram User ID via /me ──────────────────
+    const meRes = await axios.get('https://graph.instagram.com/me', {
+      params: { fields: 'user_id,username', access_token }
+    });
+    const igUserId = meRes.data.user_id || meRes.data.id;
+    console.log('[Reels] ig_user_id:', igUserId);
+
+    // ── Etapa 1: Cria o container de mídia (Reel) ────────────────────
+    console.log('\n[Reels] Etapa 1 — Criando container...');
+    const containerRes = await axios.post(
+      `https://graph.instagram.com/v22.0/${igUserId}/media`,
+      null,
+      {
+        params: {
+          media_type: 'REELS',
+          video_url,
+          caption: caption || '',
+          access_token
+        }
+      }
+    );
+    const containerId = containerRes.data.id;
+    console.log('[Reels] ✅ Container criado. ID:', containerId);
+
+    // ── Etapa 2: Polling — aguarda a Meta processar o vídeo ──────────
+    console.log('[Reels] Etapa 2 — Aguardando processamento do vídeo...');
+    const MAX_ATTEMPTS = 20;      // 20 tentativas × 15s = 5 min máximo
+    const POLL_INTERVAL_MS = 15000;
+    let attempt = 0;
+    let statusCode = 'IN_PROGRESS';
+
+    while (statusCode === 'IN_PROGRESS' && attempt < MAX_ATTEMPTS) {
+      await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
+      attempt++;
+
+      const statusRes = await axios.get(
+        `https://graph.instagram.com/v22.0/${containerId}`,
+        { params: { fields: 'status_code,status', access_token } }
+      );
+      statusCode = statusRes.data.status_code;
+      console.log(`[Reels] Tentativa ${attempt}/${MAX_ATTEMPTS} — status: ${statusCode}`);
+
+      if (statusCode === 'ERROR') {
+        console.error('[Reels] ❌ Erro reportado pela Meta:', statusRes.data);
+        return res.status(500).json({
+          error: 'A Meta retornou erro no processamento do vídeo.',
+          detail: statusRes.data
+        });
+      }
+    }
+
+    if (statusCode !== 'FINISHED') {
+      return res.status(504).json({
+        error: `Timeout: vídeo não processado em ${MAX_ATTEMPTS * POLL_INTERVAL_MS / 1000}s. Status: ${statusCode}`,
+        container_id: containerId
+      });
+    }
+
+    // ── Etapa 3: Publica o Reel ──────────────────────────────────────
+    console.log('[Reels] Etapa 3 — Publicando Reel...');
+    const publishRes = await axios.post(
+      `https://graph.instagram.com/v22.0/${igUserId}/media_publish`,
+      null,
+      { params: { creation_id: containerId, access_token } }
+    );
+    const postId = publishRes.data.id;
+    console.log('[Reels] 🎉 Reel publicado! Post ID:', postId);
+    console.log('===========================================================\n');
+
+    res.json({
+      success: true,
+      post_id: postId,
+      username: instagram_username,
+      message: `Reel publicado com sucesso em @${instagram_username}!`
+    });
+
+  } catch (err) {
+    const errData = err.response?.data || { message: err.message };
+    console.error('[Reels] ❌ Erro geral:', JSON.stringify(errData, null, 2));
+    res.status(500).json({
+      error: 'Falha ao publicar o Reel.',
+      detail: errData
+    });
   }
 });
 
