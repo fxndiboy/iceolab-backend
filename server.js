@@ -428,6 +428,21 @@ app.get('/api/videos', async (req, res) => {
 });
 
 // 8. Agendador — enfileira posts com intervalo/humanizador
+
+// Variável para rastrear número de tarefas ativas na memória (evita sleep)
+let activeJobs = 0;
+
+// Rota de ping para o próprio servidor se manter acordado
+app.get('/api/ping', (req, res) => res.send('pong'));
+
+// A cada 10 minutos, se houver jobs, o servidor bate em si mesmo
+setInterval(() => {
+  if (activeJobs > 0) {
+    console.log(`[Keep-Alive] Pingando o servidor. Jobs ativos na fila: ${activeJobs}`);
+    axios.get('https://iceolab-backend.onrender.com/api/ping').catch(() => {});
+  }
+}, 10 * 60 * 1000); // 10 minutos
+
 app.post('/api/schedule', async (req, res) => {
   const { items, postNow, scheduledAt, intervalMode, intervalMin, intervalMax, account_id } = req.body;
 
@@ -458,6 +473,8 @@ app.post('/api/schedule', async (req, res) => {
 
     console.log(`[Schedule] Item ${idx + 1}/${items.length} "${item.name}" → em ${Math.round(delayFromNow / 1000)}s`);
 
+    activeJobs++; // Registra um novo job agendado
+
     setTimeout(async () => {
       console.log(`[Schedule] ▶ Postando "${item.name}"...`);
       try {
@@ -465,6 +482,8 @@ app.post('/api/schedule', async (req, res) => {
         console.log(`[Schedule] ✅ "${item.name}" publicado. Post ID: ${result.post_id}`);
       } catch (e) {
         console.error(`[Schedule] ❌ Erro em "${item.name}":`, e.message);
+      } finally {
+        activeJobs--; // Libera o job (em sucesso ou erro)
       }
     }, delayFromNow);
 
