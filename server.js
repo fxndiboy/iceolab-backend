@@ -247,7 +247,18 @@ async function postReelToInstagram(videoUrl, caption = '', accountId = null) {
         `https://graph.instagram.com/v22.0/${igUserId}/media_publish`, null,
         { params: { creation_id: containerId, access_token } }
       );
-      return { post_id: publishRes.data.id, username: instagram_username };
+      
+      const postId = publishRes.data.id;
+
+      // --- Salva o histórico de publicação no Supabase ---
+      const videoName = videoUrl.split('/').pop().split('?')[0]; // Pega apenas o nome do arquivo XXXXX.mp4
+      await supabase.from('post_history').insert({
+        video_name: videoName,
+        account_username: instagram_username,
+        post_id: postId
+      }).catch(err => console.error('[History] Falha ignorada ao salvar hitórico na DB:', err.message));
+
+      return { post_id: postId, username: instagram_username };
     } catch (err) {
       const detail = err.response?.data?.error?.message || err.message;
       throw new Error(`Erro ao publicar o Reel: ${detail}`);
@@ -425,6 +436,34 @@ app.get('/api/videos', async (req, res) => {
     }));
 
   res.json({ videos });
+});
+
+// 7b. Rota de Histórico de Posts para o Frontend mapear de quais contas o vídeo foi postado
+app.get('/api/post-history', async (req, res) => {
+  const { data, error } = await supabase
+    .from('post_history')
+    .select('video_name, account_username')
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    if (error.code === '42P01') {
+      // Tabela ainda não criada
+      return res.json({ history: {} });
+    }
+    return res.status(500).json({ error: error.message });
+  }
+
+  // Agrupa os dados no backend para enviar num dicionário: { "nome_do_video": { "conta1": 2, "conta2": 1 } }
+  const historyMap = {};
+  for (const row of (data || [])) {
+    const v = row.video_name;
+    const acc = row.account_username;
+    if (!historyMap[v]) historyMap[v] = {};
+    if (!historyMap[v][acc]) historyMap[v][acc] = 0;
+    historyMap[v][acc]++;
+  }
+
+  res.json({ history: historyMap });
 });
 
 // 8. Agendador — enfileira posts com intervalo/humanizador
