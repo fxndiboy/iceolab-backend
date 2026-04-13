@@ -200,11 +200,17 @@ async function postReelToInstagram(videoUrl, caption = '', accountId = null) {
   });
   const igUserId = meRes.data.user_id || meRes.data.id;
 
-  const containerRes = await axios.post(
-    `https://graph.instagram.com/v22.0/${igUserId}/media`, null,
-    { params: { media_type: 'REELS', video_url: videoUrl, caption, access_token } }
-  );
-  const containerId = containerRes.data.id;
+  let containerId;
+  try {
+    const containerRes = await axios.post(
+      `https://graph.instagram.com/v22.0/${igUserId}/media`, null,
+      { params: { media_type: 'REELS', video_url: videoUrl, caption, access_token } }
+    );
+    containerId = containerRes.data.id;
+  } catch (err) {
+    const detail = err.response?.data?.error?.message || err.message;
+    throw new Error(`Erro ao criar container do Reel (Meta API): ${detail}`);
+  }
 
   // Polling
   let statusCode = 'IN_PROGRESS', attempts = 0;
@@ -218,11 +224,16 @@ async function postReelToInstagram(videoUrl, caption = '', accountId = null) {
   }
   if (statusCode !== 'FINISHED') throw new Error('Timeout no processamento do vídeo');
 
-  const publishRes = await axios.post(
-    `https://graph.instagram.com/v22.0/${igUserId}/media_publish`, null,
-    { params: { creation_id: containerId, access_token } }
-  );
-  return { post_id: publishRes.data.id, username: instagram_username };
+  try {
+    const publishRes = await axios.post(
+      `https://graph.instagram.com/v22.0/${igUserId}/media_publish`, null,
+      { params: { creation_id: containerId, access_token } }
+    );
+    return { post_id: publishRes.data.id, username: instagram_username };
+  } catch (err) {
+    const detail = err.response?.data?.error?.message || err.message;
+    throw new Error(`Erro ao publicar o Reel (Meta API): ${detail}`);
+  }
 }
 
 // 6. Motor de Publicação de Reels
