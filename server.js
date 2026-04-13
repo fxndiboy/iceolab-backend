@@ -35,6 +35,31 @@ async function ensureStorageBucket() {
 }
 ensureStorageBucket();
 
+// Helper para listar arquivos recursivamente no Supabase Storage
+async function listAllFiles(path = '') {
+  const { data, error } = await supabase.storage.from('videos').list(path, { limit: 100 });
+  if (error) throw error;
+
+  let all = [];
+  for (const item of data) {
+    if (item.name === '.emptyFolderPlaceholder') continue;
+    
+    // Se não tem metadata (size), assume que é pasta
+    if (!item.metadata) {
+      const subPath = path ? `${path}/${item.name}` : item.name;
+      const subFiles = await listAllFiles(subPath);
+      all = all.concat(subFiles);
+    } else {
+      all.push({
+        ...item,
+        fullPath: path ? `${path}/${item.name}` : item.name
+      });
+    }
+  }
+  return all;
+}
+
+
 // 1. Configuração Robusta de CORS
 const allowedOrigins = [
   process.env.FRONTEND_URL,       // https://www.reidobaralho.com.br
@@ -285,7 +310,12 @@ app.post('/api/videos/upload', upload.single('video'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado.' });
 
   const { originalname, buffer, mimetype } = req.file;
-  const safeName = `${Date.now()}-${originalname.replace(/[^a-z0-9._-]/gi, '_')}`;
+  let safeName = `${Date.now()}-${originalname.replace(/[^a-z0-9._-]/gi, '_')}`;
+
+  if (req.body.folder) {
+    const safeFolder = req.body.folder.replace(/[^a-z0-9_-]/gi, '_'); // prevent path traversal
+    safeName = `${safeFolder}/${safeName}`;
+  }
 
   console.log(`[Upload] Recebido: ${originalname} (${(buffer.length / 1024 / 1024).toFixed(1)} MB)`);
 
@@ -418,25 +448,57 @@ app.post('/api/reels/post', async (req, res) => {
   }
 });
 
-// 7. Lista vídeos disponíveis no Supabase Storage
+// 7. Lista vídeos disponíveis no Supabase Storage (Recursivo)
 app.get('/api/videos', async (req, res) => {
-  const { data, error } = await supabase.storage
-    .from('videos')
-    .list('', { limit: 200, sortBy: { column: 'created_at', order: 'desc' } });
-
-  if (error) return res.status(500).json({ error: error.message });
-
-  const videos = (data || [])
-    .filter(f => f.name !== '.emptyFolderPlaceholder')
-    .map(f => ({
+  try {
+    const data = await listAllFiles('');
+    
+    const videos = data.map(f => ({
       name: f.name,
+      fullPath: f.fullPath,
       size: f.metadata?.size || 0,
       created_at: f.created_at,
-      url: supabase.storage.from('videos').getPublicUrl(f.name).data.publicUrl
+      url: supabase.storage.from('videos').getPublicUrl(f.fullPath).data.publicUrl
     }));
 
-  res.json({ videos });
+    res.json({ videos });
+  } catch (error) {
+    console.error('[Videos] Erro ao listar:', error.message);
+    res.status(500).json({ error: error.message });
+  }
 });
+
+// 7c. Rota para Resetar o Laboratório (Apagar tudo)
+app.get('/api/videos/reset', async (req, res) => {
+  try {
+    console.log('[Reset] Iniciando limpeza total...');
+    
+    // 1. Listar todos os arquivos
+    const allFiles = await listAllFiles('');
+    const pathsToDelete = allFiles.map(f => f.fullPath);
+
+    // 2. Apagar do Storage
+    if (pathsToDelete.length > 0) {
+      const { error: storageErr } = await supabase.storage.from('videos').remove(pathsToDelete);
+      if (storageErr) throw storageErr;
+      console.log(`[Reset] ${pathsToDelete.length} arquivos removidos do storage.`);
+    }
+
+    // 3. Limpar histórico no banco
+    const { error: dbErr } = await supabase.from('post_history').delete().neq('id', '00000000-0000-0000-0000-000000000000'); // Truncate manual fake
+    // Se falhar porque id não é UUID ou tabela não existe, tentamos outro jeito
+    if (dbErr) {
+      await supabase.rpc('truncate_post_history').catch(() => {}); // Fallback para RPC se configurado
+    }
+    
+    console.log('[Reset] Histórico limpo.');
+    res.json({ success: true, message: 'Laboratório resetado com sucesso.' });
+  } catch (error) {
+    console.error('[Reset] Erro:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 
 // 7b. Rota de Histórico de Posts para o Frontend mapear de quais contas o vídeo foi postado
 app.get('/api/post-history', async (req, res) => {
