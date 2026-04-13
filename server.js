@@ -181,60 +181,69 @@ app.get('/api/accounts', async (req, res) => {
 
 // ── Função compartilhada: posta um Reel no Instagram ──────────────
 async function postReelToInstagram(videoUrl, caption = '', accountId = null) {
-  let query = supabase
-    .from('instagram_accounts')
-    .select('access_token, instagram_username');
-
-  if (accountId) {
-    query = query.eq('id', accountId);
-  } else {
-    query = query.order('created_at', { ascending: false }).limit(1);
-  }
-
-  const { data: accounts } = await query;
-  if (!accounts?.length) throw new Error('Conta Instagram não encontrada.');
-  const { access_token, instagram_username } = accounts[0];
-
-  const meRes = await axios.get('https://graph.instagram.com/me', {
-    params: { fields: 'user_id', access_token }
-  });
-  const igUserId = meRes.data.user_id || meRes.data.id;
-
-  let containerId;
   try {
-    const containerRes = await axios.post(
-      `https://graph.instagram.com/v22.0/${igUserId}/media`, null,
-      { params: { media_type: 'REELS', video_url: videoUrl, caption, access_token } }
-    );
-    containerId = containerRes.data.id;
-  } catch (err) {
-    const detail = err.response?.data?.error?.message || err.message;
-    throw new Error(`Erro ao criar container do Reel (Meta API): ${detail}`);
-  }
+    let query = supabase
+      .from('instagram_accounts')
+      .select('access_token, instagram_username');
 
-  // Polling
-  let statusCode = 'IN_PROGRESS', attempts = 0;
-  while (statusCode === 'IN_PROGRESS' && attempts < 20) {
-    await new Promise(r => setTimeout(r, 15000));
-    attempts++;
-    const s = await axios.get(`https://graph.instagram.com/v22.0/${containerId}`,
-      { params: { fields: 'status_code', access_token } });
-    statusCode = s.data.status_code;
-    if (statusCode === 'ERROR') throw new Error('Meta rejeitou o vídeo: ' + JSON.stringify(s.data));
-  }
-  if (statusCode !== 'FINISHED') throw new Error('Timeout no processamento do vídeo');
+    if (accountId) {
+      query = query.eq('id', accountId);
+    } else {
+      query = query.order('created_at', { ascending: false }).limit(1);
+    }
 
-  try {
-    const publishRes = await axios.post(
-      `https://graph.instagram.com/v22.0/${igUserId}/media_publish`, null,
-      { params: { creation_id: containerId, access_token } }
-    );
-    return { post_id: publishRes.data.id, username: instagram_username };
-  } catch (err) {
-    const detail = err.response?.data?.error?.message || err.message;
-    throw new Error(`Erro ao publicar o Reel (Meta API): ${detail}`);
+    const { data: accounts } = await query;
+    if (!accounts?.length) throw new Error('Conta Instagram não encontrada.');
+    const { access_token, instagram_username } = accounts[0];
+
+    const meRes = await axios.get('https://graph.instagram.com/me', {
+      params: { fields: 'user_id', access_token }
+    });
+    const igUserId = meRes.data.user_id || meRes.data.id;
+
+    let containerId;
+    try {
+      const containerRes = await axios.post(
+        `https://graph.instagram.com/v22.0/${igUserId}/media`, null,
+        { params: { media_type: 'REELS', video_url: videoUrl, caption, access_token } }
+      );
+      containerId = containerRes.data.id;
+    } catch (err) {
+      const detail = err.response?.data?.error?.message || err.message;
+      throw new Error(`Erro ao criar container: ${detail}`);
+    }
+
+    // Polling
+    let statusCode = 'IN_PROGRESS', attempts = 0;
+    while (statusCode === 'IN_PROGRESS' && attempts < 20) {
+      await new Promise(r => setTimeout(r, 15000));
+      attempts++;
+      const s = await axios.get(`https://graph.instagram.com/v22.0/${containerId}`,
+        { params: { fields: 'status_code', access_token } });
+      statusCode = s.data.status_code;
+      if (statusCode === 'ERROR') throw new Error('Meta rejeitou o vídeo: ' + JSON.stringify(s.data));
+    }
+    if (statusCode !== 'FINISHED') throw new Error('Timeout no processamento do vídeo');
+
+    try {
+      const publishRes = await axios.post(
+        `https://graph.instagram.com/v22.0/${igUserId}/media_publish`, null,
+        { params: { creation_id: containerId, access_token } }
+      );
+      return { post_id: publishRes.data.id, username: instagram_username };
+    } catch (err) {
+      const detail = err.response?.data?.error?.message || err.message;
+      throw new Error(`Erro ao publicar o Reel: ${detail}`);
+    }
+  } catch (globalErr) {
+    // Captura qualquer outro erro Axios (como o GET /me) para não perder o detalhe
+    if (globalErr.response?.data?.error) {
+      throw new Error(`Meta API: ${globalErr.response.data.error.message || JSON.stringify(globalErr.response.data.error)}`);
+    }
+    throw globalErr;
   }
 }
+
 
 // 6. Motor de Publicação de Reels
 // configuração multer — armazena em memória, limite de 500MB
