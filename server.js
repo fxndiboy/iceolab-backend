@@ -37,25 +37,40 @@ ensureStorageBucket();
 
 // Helper para listar arquivos recursivamente no Supabase Storage
 async function listAllFiles(path = '') {
-  const { data, error } = await supabase.storage.from('videos').list(path, { limit: 100 });
-  if (error) throw error;
-
   let all = [];
-  for (const item of data) {
-    if (item.name === '.emptyFolderPlaceholder') continue;
+  let offset = 0;
+  const PAGE_SIZE = 100;
+
+  while (true) {
+    const { data, error } = await supabase.storage.from('videos').list(path, { 
+      limit: PAGE_SIZE, 
+      offset,
+      sortBy: { column: 'name', order: 'asc' } 
+    });
     
-    // Se não tem metadata (size), assume que é pasta
-    if (!item.metadata) {
-      const subPath = path ? `${path}/${item.name}` : item.name;
-      const subFiles = await listAllFiles(subPath);
-      all = all.concat(subFiles);
-    } else {
-      all.push({
-        ...item,
-        fullPath: path ? `${path}/${item.name}` : item.name
-      });
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+
+    for (const item of data) {
+      if (item.name === '.emptyFolderPlaceholder') continue;
+      
+      // Se não tem metadata (size), assume que é pasta
+      if (!item.metadata) {
+        const subPath = path ? `${path}/${item.name}` : item.name;
+        const subFiles = await listAllFiles(subPath);
+        all = all.concat(subFiles);
+      } else {
+        all.push({
+          ...item,
+          fullPath: path ? `${path}/${item.name}` : item.name
+        });
+      }
     }
+
+    if (data.length < PAGE_SIZE) break;
+    offset += PAGE_SIZE;
   }
+  
   return all;
 }
 
