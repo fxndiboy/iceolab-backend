@@ -106,8 +106,25 @@ app.get('/api/auth/meta/callback', async (req, res) => {
     // Novo formato da API: { data: [{ access_token, user_id, permissions }] }
     // Suporta também o formato legado: { access_token, user_id }
     const tokenData = tokenResponse.data?.data?.[0] || tokenResponse.data;
-    const { access_token, user_id } = tokenData;
-    console.log('[Callback] Token recebido para user_id:', user_id);
+    let { access_token, user_id } = tokenData;
+    console.log('[Callback] Token curto recebido para user_id:', user_id);
+
+    // Passo 1.5: Troca o access_token de curto prazo (1-2h) por um de longo prazo (60 dias)
+    try {
+      const longLivedRes = await axios.get('https://graph.instagram.com/access_token', {
+        params: {
+          grant_type: 'ig_exchange_token',
+          client_secret: process.env.META_APP_SECRET,
+          access_token: access_token
+        }
+      });
+      if (longLivedRes.data?.access_token) {
+        access_token = longLivedRes.data.access_token;
+        console.log('[Callback] Token longo recebido com sucesso (válido por ~60 dias).');
+      }
+    } catch (exchangeErr) {
+      console.warn('[Callback] Aviso: falha ao gerar token longo, usando o curto.', exchangeErr.message);
+    }
 
     // Passo 2: Busca o username e profile_picture_url na Graph API
     const profileResponse = await axios.get('https://graph.instagram.com/me', {
