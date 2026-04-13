@@ -484,14 +484,18 @@ app.get('/api/videos/reset', async (req, res) => {
       console.log(`[Reset] ${pathsToDelete.length} arquivos removidos do storage.`);
     }
 
-    // 3. Limpar histórico no banco
-    const { error: dbErr } = await supabase.from('post_history').delete().neq('id', '00000000-0000-0000-0000-000000000000'); // Truncate manual fake
-    // Se falhar porque id não é UUID ou tabela não existe, tentamos outro jeito
+    // 3. Limpar histórico no banco (mais robusto)
+    const { error: dbErr } = await supabase
+      .from('post_history')
+      .delete()
+      .not('created_at', 'is', null); // Deleta tudo que tem data de criação (quase tudo)
+
     if (dbErr) {
-      await supabase.rpc('truncate_post_history').catch(() => {}); // Fallback para RPC se configurado
+      console.warn('[Reset] Falha ao limpar post_history do banco:', dbErr.message);
+      // Não damos throw aqui porque o storage já foi limpo, o que é o principal
     }
     
-    console.log('[Reset] Histórico limpo.');
+    console.log('[Reset] Limpeza concluída.');
     res.json({ success: true, message: 'Laboratório resetado com sucesso.' });
   } catch (error) {
     console.error('[Reset] Erro:', error.message);
