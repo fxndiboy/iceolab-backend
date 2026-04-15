@@ -1,4 +1,4 @@
-// Versão: 1.0.7 - Deployment Sync + Resilience fix
+// Versão: 1.0.8 - Regex Parser + Deployment Sync
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -101,7 +101,7 @@ app.use(express.json());
 
 // 2. Rota de Teste de Status
 app.get('/api/status', (req, res) => {
-  res.json({ status: 'ok', message: 'Motor do IceoLab online v1.0.7' });
+  res.json({ status: 'ok', message: 'Motor do IceoLab online v1.0.8' });
 });
 
 // 3. Autenticação OAuth 2.0 — Instagram Business Login (interface 100% Instagram)
@@ -489,14 +489,24 @@ app.post('/api/reels/post', async (req, res) => {
 app.get('/api/videos', async (req, res) => {
   try {
     const data = await listAllFiles('');
+    const regex = /^Top(?<rank>\d{2})_(?<views>[\d\.MK]+)_v_(?<id>.+)\.mp4$/;
     
-    const videos = data.map(f => ({
-      name: f.name,
-      fullPath: f.fullPath,
-      size: f.metadata?.size || 0,
-      created_at: f.created_at,
-      url: supabase.storage.from('videos').getPublicUrl(f.fullPath).data.publicUrl
-    }));
+    const videos = data.map(f => {
+      const match = f.name.match(regex);
+      const meta = match?.groups || {};
+      
+      return {
+        name: f.name,
+        fullPath: f.fullPath,
+        size: f.metadata?.size || 0,
+        created_at: f.created_at,
+        url: supabase.storage.from('videos').getPublicUrl(f.fullPath).data.publicUrl,
+        // Metadata extraída do nome do arquivo
+        rank: meta.rank ? parseInt(meta.rank) : null,
+        views: meta.views || null,
+        videoId: meta.id || null
+      };
+    });
 
     res.json({ videos });
   } catch (error) {
