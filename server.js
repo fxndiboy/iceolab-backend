@@ -236,6 +236,28 @@ app.get('/api/accounts', async (req, res) => {
   }
 });
 
+// 5b. Rota: Deleta uma conta Instagram específica
+app.delete('/api/accounts/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    console.log(`[Accounts] Removendo conta ID: ${id}`);
+    const { error } = await supabase
+      .from('instagram_accounts')
+      .delete()
+      .eq('id', id);
+
+    if (error) {
+      console.error('[Accounts] Erro ao remover conta:', error.message);
+      return res.status(500).json({ error: error.message });
+    }
+
+    res.json({ success: true, message: 'Conta removida com sucesso.' });
+  } catch (err) {
+    console.error('[Accounts] Erro ao remover:', err.message);
+    res.status(500).json({ error: 'Erro interno ao remover conta.' });
+  }
+});
+
 // ── Função compartilhada: posta um Reel no Instagram ──────────────
 async function postReelToInstagram(videoUrl, caption = '', accountId = null) {
   try {
