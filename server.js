@@ -1,4 +1,4 @@
-// Versão: 1.0.6 - Agendador + bucket auto-create
+// Versão: 1.0.7 - Deployment Sync + Resilience fix
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -101,7 +101,7 @@ app.use(express.json());
 
 // 2. Rota de Teste de Status
 app.get('/api/status', (req, res) => {
-  res.json({ status: 'ok', message: 'Motor do IceoLab online v1.0.4' });
+  res.json({ status: 'ok', message: 'Motor do IceoLab online v1.0.7' });
 });
 
 // 3. Autenticação OAuth 2.0 — Instagram Business Login (interface 100% Instagram)
@@ -549,11 +549,9 @@ app.get('/api/post-history', async (req, res) => {
     .order('created_at', { ascending: false });
 
   if (error) {
-    if (error.code === '42P01') {
-      // Tabela ainda não criada
-      return res.json({ history: {} });
-    }
-    return res.status(500).json({ error: error.message });
+    console.warn('[History] Aviso ao buscar histórico:', error.message);
+    // Retorna vazio em vez de 500 se houver erro (tabela não criada, etc)
+    return res.json({ history: {} });
   }
 
   // Agrupa os dados no backend para enviar num dicionário: { "nome_do_video": { "conta1": 2, "conta2": 1 } }
